@@ -1,0 +1,29 @@
+{
+  "development": {
+    "username": "room3_user",
+    "password": "room3_password",
+    "database": "taskmanager",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dialect": "postgres",
+    "logging": false
+  },
+  "test": {
+    "username": "room3_user",
+    "password": "room3_password",
+    "database": "taskmanager_test",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dialect": "postgres",
+    "logging": false
+  },
+  "production": {
+    "username": "room3_user",
+    "password": "room3_password",
+    "database": "taskmanager_prod",
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dialect": "postgres",
+    "logging": false
+  }
+}
