@@ -2,9 +2,6 @@
 
 module.exports = {
   async up(queryInterface, Sequelize) {
-    // Enable UUID extension
-    await queryInterface.sequelize.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
-    
     await queryInterface.createTable('users', {
       id: {
         type: Sequelize.UUID,
@@ -35,6 +32,12 @@ module.exports = {
         allowNull: false,
         defaultValue: Sequelize.literal('now()')
       }
+    });
+
+    // Add unique index on email
+    await queryInterface.addIndex('users', ['email'], {
+      unique: true,
+      name: 'users_email_unique'
     });
   },
 

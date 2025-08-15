@@ -48,39 +48,69 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/lists/:id - Update list
+// PUT /api/tasks/:id - Update task
 router.put('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { name, sort_order } = req.body;
+    console.log('=== PUT TASK REQUEST ===');
+    console.log('Task ID:', req.params.id);
+    console.log('Request body:', req.body);
+    console.log('User ID:', req.user.id);
 
-    const list = await List.findOne({
+    const { id } = req.params;
+    const { title, description, priority, status, due_date, list_id } = req.body;
+
+    const task = await Task.findOne({
       where: { id, user_id: req.user.id }
     });
 
-    if (!list) {
-      return res.status(404).json({ error: 'List not found' });
+    if (!task) {
+      console.log('Task not found');
+      return res.status(404).json({ error: 'Task not found' });
     }
 
-    // Validation
-    if (name !== undefined) {
-      if (!name?.trim()) {
-        return res.status(400).json({ error: 'List name is required' });
-      }
-      if (name.trim().length > 255) {
-        return res.status(400).json({ error: 'List name must be 255 characters or less' });
+    console.log('Current task:', task.toJSON());
+
+    // If moving to different list, verify list ownership
+    if (list_id && list_id !== task.list_id) {
+      const list = await List.findOne({
+        where: { id: list_id, user_id: req.user.id }
+      });
+      if (!list) {
+        return res.status(404).json({ error: 'Target list not found' });
       }
     }
 
-    await list.update({
-      ...(name !== undefined && { name: name.trim() }),
-      ...(sort_order !== undefined && { sort_order })
-    });
+    // Prepare update data including status
+    const updateData = {};
+    if (title !== undefined) updateData.title = title.trim();
+    if (description !== undefined) updateData.description = description?.trim();
+    if (priority !== undefined) updateData.priority = priority;
+    if (due_date !== undefined) updateData.due_date = due_date ? new Date(due_date) : null;
+    if (list_id !== undefined) updateData.list_id = list_id;
 
-    res.json(list);
+    // Handle status update with completed_at logic
+    if (status !== undefined) {
+      updateData.status = status;
+
+      // Set/clear completed_at based on status change
+      if (status === 'done' && task.status !== 'done') {
+        updateData.completed_at = new Date();
+      } else if (status !== 'done' && task.status === 'done') {
+        updateData.completed_at = null;
+      }
+    }
+
+    console.log('Update data:', updateData);
+
+    await task.update(updateData);
+    const updatedTask = await task.reload();
+
+    console.log('Updated task:', updatedTask.toJSON());
+
+    res.json(updatedTask);
   } catch (error) {
-    console.error('Update list error:', error);
-    res.status(500).json({ error: 'Failed to update list' });
+    console.error('Update task error:', error);
+    res.status(500).json({ error: 'Failed to update task' });
   }
 });
 

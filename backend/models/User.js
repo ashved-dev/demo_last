@@ -38,17 +38,8 @@ const User = sequelize.define('User', {
       if (user.email) {
         user.email = user.email.toLowerCase();
       }
-    },
-    afterCreate: async (user, options) => {
-      // Create default Inbox list for new user
-      const { List } = require('./List');
-      await List.create({
-        user_id: user.id,
-        name: 'Inbox',
-        is_default: true,
-        sort_order: 0
-      }, { transaction: options.transaction });
     }
+    // Видаляємо afterCreate хук - створення Inbox списку тепер відбувається в auth роуті
   }
 });
 

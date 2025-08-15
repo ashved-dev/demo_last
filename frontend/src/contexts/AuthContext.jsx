@@ -35,10 +35,32 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (credentials) => {
-    const response = await apiClient.post('/auth/login', credentials);
-    setUser(response.user);
-    setIsAuthenticated(true);
-    return response;
+    try {
+      const response = await apiClient.post('/auth/login', credentials);
+      setUser(response.user);
+      setIsAuthenticated(true);
+      return response;
+    } catch (error) {
+      // Детальна обробка помилок логіну
+      console.error('Login error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+
+      // Пробросити помилку з детальним повідомленням
+      if (error.response?.status === 401) {
+        throw new Error('Invalid email or password');
+      } else if (error.response?.status === 400) {
+        throw new Error(error.response.data?.error || 'Invalid login data');
+      } else if (error.response?.status === 500) {
+        throw new Error('Server error. Please try again later.');
+      } else if (error.message?.includes('Network Error')) {
+        throw new Error('Network connection failed. Please check your internet connection.');
+      } else {
+        throw new Error(error.response?.data?.error || error.message || 'Login failed');
+      }
+    }
   };
 
   const logout = async () => {
@@ -62,8 +84,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+      <AuthContext.Provider value={value}>
+        {children}
+      </AuthContext.Provider>
   );
 };

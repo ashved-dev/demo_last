@@ -33,13 +33,17 @@ router.post('/register', async (req, res) => {
 
     // Create user and default Inbox list in transaction
     const result = await User.sequelize.transaction(async (t) => {
+      // Create user WITHOUT afterCreate hook execution
       const user = await User.create({
         name: name.trim(),
         email: email.toLowerCase().trim(),
         password_hash
-      }, { transaction: t });
+      }, {
+        transaction: t,
+        hooks: false // Відключаємо хуки для уникнення конфліктів
+      });
 
-      // Create default Inbox list
+      // Create default Inbox list безпосередньо тут
       await List.create({
         user_id: user.id,
         name: 'Inbox',
@@ -91,9 +95,9 @@ router.post('/login', async (req, res) => {
 
     // Generate JWT token
     const token = jwt.sign(
-      { id: user.id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+        { id: user.id, email: user.email },
+        process.env.JWT_SECRET,
+        { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
     // Set HttpOnly cookie
@@ -136,7 +140,7 @@ router.post('/logout', (req, res) => {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'strict'
   });
-  
+
   res.json({ message: 'Logout successful' });
 });
 
