@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, {useState, useEffect} from 'react';
+import {useParams, useNavigate} from 'react-router-dom';
 import {
     Typography,
     Button,
@@ -18,28 +18,26 @@ import {
     Spin,
     Tooltip,
     Popconfirm,
-    Switch,
-    Divider,
-    Badge
+    Radio
 } from 'antd';
 import {
     PlusOutlined,
     EditOutlined,
     DeleteOutlined,
     CalendarOutlined,
-    ClockCircleOutlined,
     CheckCircleOutlined,
-    EyeOutlined,
-    EyeInvisibleOutlined
+    PlayCircleOutlined,
+    PauseCircleOutlined,
+    ClockCircleOutlined
 } from '@ant-design/icons';
-import { apiClient } from '../config/api';
+import {apiClient} from '../config/api';
 import moment from 'moment';
 
-const { Title, Text } = Typography;
-const { TextArea } = Input;
+const {Title, Text} = Typography;
+const {TextArea} = Input;
 
 const ListView = () => {
-    const { listId } = useParams();
+    const {listId} = useParams();
     const navigate = useNavigate();
     const [currentList, setCurrentList] = useState(null);
     const [allTasks, setAllTasks] = useState([]);
@@ -47,7 +45,12 @@ const ListView = () => {
     const [loading, setLoading] = useState(true);
     const [taskModalVisible, setTaskModalVisible] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
-    const [showCompleted, setShowCompleted] = useState(false);
+    const [activeFilter, setActiveFilter] = useState('all');
+    const [priorityFilter, setPriorityFilter] = useState('all');
+    const [dateFilter, setDateFilter] = useState('all');
+    const [activeTimers, setActiveTimers] = useState({});
+    const [timerTimes, setTimerTimes] = useState({});
+    const [totalTimes, setTotalTimes] = useState({}); // Загальний час по завданнях
     const [form] = Form.useForm();
 
     useEffect(() => {
@@ -56,20 +59,126 @@ const ListView = () => {
         }
     }, [listId]);
 
-    // Filter tasks based on showCompleted state
-    useEffect(() => {
-        if (showCompleted) {
-            setFilteredTasks(allTasks);
-        } else {
-            setFilteredTasks(allTasks.filter(task => task.status !== 'done'));
+    // Functions definition first
+    const checkActiveTimers = async () => {
+        try {
+            const activeEntries = await apiClient.get('/time-entries?active=true');
+            const timersMap = {};
+            const timesMap = {};
+
+            activeEntries.forEach(entry => {
+                if (allTasks.some(task => task.id === entry.task_id)) {
+                    timersMap[entry.task_id] = entry;
+                    const elapsed = Math.floor((Date.now() - new Date(entry.start_time)) / 1000);
+                    timesMap[entry.task_id] = elapsed;
+                }
+            });
+
+            setActiveTimers(timersMap);
+            setTimerTimes(timesMap);
+        } catch (error) {
+            console.error('Failed to check active timers:', error);
         }
-    }, [allTasks, showCompleted]);
+    };
+
+    const fetchTotalTimes = async () => {
+        try {
+            if (!allTasks.length) return;
+
+            const timesMap = {};
+            await Promise.all(
+                allTasks.map(async (task) => {
+                    try {
+                        const timeEntries = await apiClient.get(`/time-entries?task_id=${task.id}`);
+                        const totalSeconds = timeEntries.reduce((sum, entry) => sum + (entry.duration_seconds || 0), 0);
+                        timesMap[task.id] = totalSeconds;
+                    } catch (error) {
+                        console.error(`Failed to fetch time for task ${task.id}:`, error);
+                        timesMap[task.id] = 0;
+                    }
+                })
+            );
+
+            setTotalTimes(timesMap);
+        } catch (error) {
+            console.error('Failed to fetch total times:', error);
+        }
+    };
+
+    // Timer interval for real-time updates
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setTimerTimes(prev => {
+                const updated = {...prev};
+                Object.keys(activeTimers).forEach(taskId => {
+                    if (activeTimers[taskId]) {
+                        const elapsed = Math.floor((Date.now() - new Date(activeTimers[taskId].start_time)) / 1000);
+                        updated[taskId] = elapsed;
+                    }
+                });
+                return updated;
+            });
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [activeTimers]);
+
+    useEffect(() => {
+        let filtered = allTasks;
+
+        // Filter by status
+        switch (activeFilter) {
+            case 'pending':
+                filtered = filtered.filter(task => task.status === 'planned');
+                break;
+            case 'in_progress':
+                filtered = filtered.filter(task => task.status === 'in_progress');
+                break;
+            case 'done':
+                filtered = filtered.filter(task => task.status === 'done');
+                break;
+            default:
+                break;
+        }
+
+        // Filter by priority
+        if (priorityFilter !== 'all') {
+            filtered = filtered.filter(task => task.priority === priorityFilter);
+        }
+
+        // Filter by date
+        if (dateFilter !== 'all') {
+            const today = moment().startOf('day');
+            const tomorrow = moment().add(1, 'day').startOf('day');
+            const nextWeekStart = moment().add(1, 'week').startOf('week');
+            const nextWeekEnd = moment().add(1, 'week').endOf('week');
+
+            filtered = filtered.filter(task => {
+                if (!task.due_date) return false;
+
+                const dueDate = moment(task.due_date).startOf('day');
+
+                switch (dateFilter) {
+                    case 'overdue':
+                        return dueDate.isBefore(today) && task.status !== 'done';
+                    case 'today':
+                        return dueDate.isSame(today);
+                    case 'tomorrow':
+                        return dueDate.isSame(tomorrow);
+                    case 'next_week':
+                        return dueDate.isBetween(nextWeekStart, nextWeekEnd, null, '[]');
+                    default:
+                        return true;
+                }
+            });
+        }
+
+        setFilteredTasks(filtered);
+    }, [allTasks, activeFilter, priorityFilter, dateFilter]);
 
     const fetchListAndTasks = async () => {
         try {
             setLoading(true);
-
-            // Fetch list details and tasks in parallel
             const [listsResponse, tasksResponse] = await Promise.all([
                 apiClient.get('/lists'),
                 apiClient.get(`/tasks?list_id=${listId}`)
@@ -84,426 +193,906 @@ const ListView = () => {
 
             setCurrentList(list);
             setAllTasks(tasksResponse);
+
+            // Fetch times after tasks are loaded
+            setTimeout(() => {
+                checkActiveTimers();
+                fetchTotalTimes();
+            }, 100);
         } catch (error) {
             message.error('Failed to load list');
             console.error('Error fetching list and tasks:', error);
         } finally {
             setLoading(false);
-        }
-    };
+            const fetchTotalTimes = async () => {
+                try {
+                    if (!allTasks.length) return;
 
-    const handleCreateTask = () => {
-        setEditingTask(null);
-        form.resetFields();
-        form.setFieldsValue({
-            priority: 'medium',
-            status: 'planned'
-        });
-        setTaskModalVisible(true);
-    };
+                    const timesMap = {};
+                    await Promise.all(
+                        allTasks.map(async (task) => {
+                            try {
+                                const timeEntries = await apiClient.get(`/time-entries?task_id=${task.id}`);
+                                const totalSeconds = timeEntries.reduce((sum, entry) => sum + (entry.duration_seconds || 0), 0);
+                                timesMap[task.id] = totalSeconds;
+                            } catch (error) {
+                                console.error(`Failed to fetch time for task ${task.id}:`, error);
+                                timesMap[task.id] = 0;
+                            }
+                        })
+                    );
 
-    const handleEditTask = (task) => {
-        setEditingTask(task);
-        form.setFieldsValue({
-            title: task.title,
-            description: task.description,
-            priority: task.priority,
-            status: task.status,
-            due_date: task.due_date ? moment(task.due_date) : null
-        });
-        setTaskModalVisible(true);
-    };
-
-    const handleSubmitTask = async (values) => {
-        try {
-            const taskData = {
-                title: values.title,
-                description: values.description,
-                priority: values.priority,
-                status: values.status,
-                due_date: values.due_date ? values.due_date.toISOString() : null,
-                list_id: listId
+                    setTotalTimes(timesMap);
+                } catch (error) {
+                    console.error('Failed to fetch total times:', error);
+                }
             };
 
-            if (editingTask) {
-                // Update existing task - використовуємо всі поля включно зі статусом
-                const updatedTask = await apiClient.put(`/tasks/${editingTask.id}`, taskData);
-                setAllTasks(allTasks.map(task =>
-                    task.id === editingTask.id ? updatedTask : task
-                ));
-                message.success('Task updated successfully!');
-            } else {
-                // Create new task
-                const newTask = await apiClient.post('/tasks', taskData);
-                setAllTasks([...allTasks, newTask]);
-                message.success('Task created successfully!');
-            }
+            const checkActiveTimers = async () => {
+                try {
+                    const activeEntries = await apiClient.get('/time-entries?active=true');
+                    const timersMap = {};
+                    const timesMap = {};
 
-            setTaskModalVisible(false);
-            form.resetFields();
-        } catch (error) {
-            console.error('Task submit error:', error);
-            message.error(error.message || 'Failed to save task');
-        }
-    };
+                    activeEntries.forEach(entry => {
+                        if (allTasks.some(task => task.id === entry.task_id)) {
+                            timersMap[entry.task_id] = entry;
+                            const elapsed = Math.floor((Date.now() - new Date(entry.start_time)) / 1000);
+                            timesMap[entry.task_id] = elapsed;
+                        }
+                    });
 
-    const handleDeleteTask = async (taskId) => {
-        try {
-            console.log('Deleting task with ID:', taskId);
-            await apiClient.delete(`/tasks/${taskId}`);
-            setAllTasks(allTasks.filter(task => task.id !== taskId));
-            message.success('Task deleted successfully!');
-        } catch (error) {
-            console.error('Task deletion error:', error);
-            message.error(error.message || 'Failed to delete task');
-        }
-    };
+                    setActiveTimers(timersMap);
+                    setTimerTimes(timesMap);
+                } catch (error) {
+                    console.error('Failed to check active timers:', error);
+                }
+            };
 
-    const handleToggleTaskStatus = async (task) => {
-        try {
-            // Визначаємо новий статус
-            const newStatus = task.status === 'done' ? 'planned' : 'done';
-
-            // Використовуємо правильний PATCH endpoint для статусу
-            const updatedTask = await apiClient.patch(`/tasks/${task.id}/status`, {
-                status: newStatus
-            });
-
-            // Оновлюємо локальний стан
-            setAllTasks(allTasks.map(t => t.id === task.id ? updatedTask : t));
-
-            // Показуємо відповідне повідомлення
-            if (newStatus === 'done') {
-                message.success('Task completed! 🎉');
-            } else {
-                message.info('Task marked as incomplete');
-            }
-        } catch (error) {
-            console.error('Task toggle error:', error);
-            message.error('Failed to update task status');
-        }
-    };
-
-    const getPriorityColor = (priority) => {
-        switch (priority) {
-            case 'high': return 'red';
-            case 'medium': return 'orange';
-            case 'low': return 'green';
-            default: return 'default';
-        }
-    };
-
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'done': return 'success';
-            case 'in_progress': return 'processing';
-            case 'planned': return 'default';
-            default: return 'default';
-        }
-    };
-
-    const getTaskStats = () => {
-        const total = allTasks.length;
-        const completed = allTasks.filter(task => task.status === 'done').length;
-        const pending = total - completed;
-        return { total, completed, pending };
-    };
-
-    if (loading) {
-        return (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
-                <Spin size="large" />
-            </div>
-        );
-    }
-
-    const stats = getTaskStats();
-
-    return (
-        <div style={{ padding: '24px' }}>
-            {/* Header */}
-            <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '24px'
-            }}>
-                <div>
-                    <Title level={2} style={{ margin: 0 }}>
-                        {currentList?.name || 'Tasks'}
-                    </Title>
-                    <Space size="large" style={{ marginTop: '8px' }}>
-                        <Text type="secondary">
-                            <Badge count={stats.pending} overflowCount={999} color="#1677ff" />
-                            <span style={{ marginLeft: '8px' }}>Pending</span>
-                        </Text>
-                        <Text type="secondary">
-                            <Badge count={stats.completed} overflowCount={999} color="#52c41a" />
-                            <span style={{ marginLeft: '8px' }}>Completed</span>
-                        </Text>
-                        <Text type="secondary">
-                            Total: {stats.total}
-                        </Text>
-                    </Space>
-                </div>
-                <Space>
-                    <Tooltip title={showCompleted ? "Hide completed tasks" : "Show completed tasks"}>
-                        <Button
-                            type={showCompleted ? "primary" : "default"}
-                            icon={showCompleted ? <EyeInvisibleOutlined /> : <EyeOutlined />}
-                            onClick={() => setShowCompleted(!showCompleted)}
-                        >
-                            {showCompleted ? 'Hide' : 'Show'} Completed
-                        </Button>
-                    </Tooltip>
-                    <Button
-                        type="primary"
-                        icon={<PlusOutlined />}
-                        onClick={handleCreateTask}
-                    >
-                        Add Task
-                    </Button>
-                </Space>
-            </div>
-
-            {/* Progress indicator */}
-            {stats.total > 0 && (
-                <div style={{
-                    background: '#fff',
-                    padding: '16px',
-                    borderRadius: '8px',
-                    marginBottom: '16px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
-                }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                        <Text strong>Progress</Text>
-                        <Text strong>{Math.round((stats.completed / stats.total) * 100)}%</Text>
-                    </div>
-                    <div style={{
-                        background: '#f0f0f0',
-                        borderRadius: '4px',
-                        height: '8px',
-                        overflow: 'hidden'
-                    }}>
-                        <div style={{
-                            background: '#52c41a',
-                            height: '100%',
-                            width: `${(stats.completed / stats.total) * 100}%`,
-                            borderRadius: '4px',
-                            transition: 'width 0.3s ease'
-                        }} />
-                    </div>
-                </div>
-            )}
-
-            {/* Tasks List */}
-            {filteredTasks.length === 0 ? (
-                <Empty
-                    description={
-                        allTasks.length === 0
-                            ? "No tasks yet"
-                            : showCompleted
-                                ? "No tasks found"
-                                : "No pending tasks"
+            const startTimer = async (taskId) => {
+                try {
+                    // Check if any timer is already running
+                    const hasActiveTimer = Object.keys(activeTimers).length > 0;
+                    if (hasActiveTimer) {
+                        message.warning('Please stop the current timer before starting a new one');
+                        return;
                     }
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                >
-                    {allTasks.length === 0 && (
-                        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateTask}>
-                            Create your first task
-                        </Button>
-                    )}
-                </Empty>
-            ) : (
-                <List
-                    dataSource={filteredTasks}
-                    renderItem={(task) => (
-                        <List.Item>
-                            <Card
-                                style={{
-                                    width: '100%',
-                                    opacity: task.status === 'done' ? 0.7 : 1,
-                                    transition: 'opacity 0.3s ease'
-                                }}
-                                bodyStyle={{ padding: '16px' }}
-                            >
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                                    <Tooltip title={task.status === 'done' ? 'Mark as incomplete' : 'Mark as complete'}>
-                                        <Checkbox
-                                            checked={task.status === 'done'}
-                                            onChange={() => handleToggleTaskStatus(task)}
-                                            style={{ marginTop: '2px' }}
-                                        />
-                                    </Tooltip>
 
-                                    <div style={{ flex: 1 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                            <div style={{ flex: 1 }}>
-                                                <Text
-                                                    strong
-                                                    style={{
-                                                        textDecoration: task.status === 'done' ? 'line-through' : 'none',
-                                                        color: task.status === 'done' ? '#999' : 'inherit',
-                                                        fontSize: '16px'
-                                                    }}
-                                                >
-                                                    {task.title}
-                                                </Text>
-                                                {task.description && (
-                                                    <div style={{ marginTop: '6px' }}>
-                                                        <Text
-                                                            type="secondary"
-                                                            style={{
-                                                                textDecoration: task.status === 'done' ? 'line-through' : 'none'
-                                                            }}
-                                                        >
-                                                            {task.description}
-                                                        </Text>
-                                                    </div>
-                                                )}
+                    const response = await apiClient.post('/time-entries/start', {
+                        task_id: taskId
+                    });
 
-                                                <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                                    <Tag color={getPriorityColor(task.priority)}>
-                                                        {task.priority.toUpperCase()}
-                                                    </Tag>
-                                                    <Tag color={getStatusColor(task.status)}>
-                                                        {task.status === 'in_progress' ? 'IN PROGRESS' : task.status.toUpperCase()}
-                                                    </Tag>
-                                                    {task.due_date && (
-                                                        <Tag
-                                                            icon={<CalendarOutlined />}
-                                                            color={moment(task.due_date).isBefore(moment(), 'day') && task.status !== 'done' ? 'red' : 'blue'}
-                                                        >
-                                                            {moment(task.due_date).format('MMM DD')}
-                                                            {moment(task.due_date).isBefore(moment(), 'day') && task.status !== 'done' && ' (Overdue)'}
-                                                        </Tag>
-                                                    )}
-                                                    {task.completed_at && (
-                                                        <Tag icon={<CheckCircleOutlined />} color="green">
-                                                            Completed {moment(task.completed_at).format('MMM DD')}
-                                                        </Tag>
-                                                    )}
-                                                </div>
-                                            </div>
+                    setActiveTimers({[taskId]: response});
+                    setTimerTimes({[taskId]: 0});
+                    message.success('Timer started! ⏰');
+                } catch (error) {
+                    message.error(error.message || 'Failed to start timer');
+                }
+            };
 
-                                            <Space>
-                                                <Tooltip title="Edit task">
-                                                    <Button
-                                                        type="text"
-                                                        icon={<EditOutlined />}
-                                                        onClick={() => handleEditTask(task)}
-                                                    />
-                                                </Tooltip>
-                                                <Popconfirm
-                                                    title="Delete task"
-                                                    description="Are you sure you want to delete this task?"
-                                                    onConfirm={() => handleDeleteTask(task.id)}
-                                                    okText="Yes"
-                                                    cancelText="No"
-                                                >
-                                                    <Tooltip title="Delete task">
-                                                        <Button
-                                                            type="text"
-                                                            icon={<DeleteOutlined />}
-                                                            danger
-                                                        />
-                                                    </Tooltip>
-                                                </Popconfirm>
-                                            </Space>
-                                        </div>
-                                    </div>
-                                </div>
-                            </Card>
-                        </List.Item>
-                    )}
+            const stopTimer = async (taskId) => {
+                try {
+                    const timer = activeTimers[taskId];
+                    if (!timer) return;
+
+                    await apiClient.put(`/time-entries/${timer.id}/stop`);
+
+                    setActiveTimers(prev => {
+                        const updated = {...prev};
+                        delete updated[taskId];
+                        return updated;
+                    });
+
+                    setTimerTimes(prev => {
+                        const updated = {...prev};
+                        delete updated[taskId];
+                        return updated;
+                    });
+
+                    // Оновити загальний час для цього завдання
+                    const timeEntries = await apiClient.get(`/time-entries?task_id=${taskId}`);
+                    const totalSeconds = timeEntries.reduce((sum, entry) => sum + (entry.duration_seconds || 0), 0);
+                    setTotalTimes(prev => ({
+                        ...prev,
+                        [taskId]: totalSeconds
+                    }));
+
+                    message.success('Timer stopped! ✅');
+                } catch (error) {
+                    message.error(error.message || 'Failed to stop timer');
+                }
+            };
+
+            const formatDuration = (seconds) => {
+                const hours = Math.floor(seconds / 3600);
+                const minutes = Math.floor((seconds % 3600) / 60);
+                const secs = seconds % 60;
+
+                if (hours > 0) {
+                    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                } else {
+                    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+                }
+            };
+
+            const handleCreateTask = () => {
+                setEditingTask(null);
+                form.resetFields();
+                form.setFieldsValue({
+                    priority: 'medium',
+                    status: 'planned'
+                });
+                setTaskModalVisible(true);
+            };
+
+            const handleEditTask = (task) => {
+                setEditingTask(task);
+                form.setFieldsValue({
+                    title: task.title,
+                    description: task.description,
+                    priority: task.priority,
+                    status: task.status,
+                    due_date: task.due_date ? moment(task.due_date) : null
+                });
+                setTaskModalVisible(true);
+            };
+
+            const handleSubmitTask = async (values) => {
+                try {
+                    const taskData = {
+                        title: values.title,
+                        description: values.description,
+                        priority: values.priority,
+                        status: values.status,
+                        due_date: values.due_date ? values.due_date.toISOString() : null,
+                        list_id: listId
+                    };
+
+                    if (editingTask) {
+                        const updatedTask = await apiClient.put(`/tasks/${editingTask.id}`, taskData);
+                        setAllTasks(allTasks.map(task =>
+                            task.id === editingTask.id ? updatedTask : task
+                        ));
+                        message.success('Task updated successfully!');
+                    } else {
+                        const newTask = await apiClient.post('/tasks', taskData);
+                        setAllTasks([...allTasks, newTask]);
+                        message.success('Task created successfully!');
+                    }
+
+                    setTaskModalVisible(false);
+                    form.resetFields();
+                } catch (error) {
+                    console.error('Task submit error:', error);
+                    message.error(error.message || 'Failed to save task');
+                }
+            };
+
+            const handleDeleteTask = async (taskId) => {
+                try {
+                    await apiClient.delete(`/tasks/${taskId}`);
+                    setAllTasks(allTasks.filter(task => task.id !== taskId));
+                    message.success('Task deleted successfully!');
+                } catch (error) {
+                    console.error('Task deletion error:', error);
+                    message.error(error.message || 'Failed to delete task');
+                }
+            };
+
+            const handleToggleTaskStatus = async (task) => {
+                try {
+                    const newStatus = task.status === 'done' ? 'planned' : 'done';
+                    const updatedTask = await apiClient.patch(`/tasks/${task.id}/status`, {
+                        status: newStatus
+                    });
+
+                    setAllTasks(allTasks.map(t => t.id === task.id ? updatedTask : t));
+
+                    if (newStatus === 'done') {
+                        message.success('Task completed! 🎉');
+                    } else {
+                        message.info('Task marked as incomplete');
+                    }
+                } catch (error) {
+                    console.error('Task toggle error:', error);
+                    message.error('Failed to update task status');
+                }
+            };
+
+            const getPriorityColor = (priority) => {
+                switch (priority) {
+                    case 'high':
+                        return '#ff4d4f';
+                    case 'medium':
+                        return '#faad14';
+                    case 'low':
+                        return '#52c41a';
+                    default:
+                        return '#d9d9d9';
+                }
+            };
+
+            const getStatusColor = (status) => {
+                switch (status) {
+                    case 'done':
+                        return '#52c41a';
+                    case 'in_progress':
+                        return '#faad14';
+                    case 'planned':
+                        return '#1677ff';
+                    default:
+                        return '#d9d9d9';
+                }
+            };
+
+            const getDueDateColor = (dueDate, status) => {
+                if (!dueDate) return '#d9d9d9';
+                if (status === 'done') return '#52c41a';
+
+                const today = moment();
+                const due = moment(dueDate);
+
+                if (due.isBefore(today, 'day')) {
+                    return '#ff4d4f';
+                } else if (due.isSame(today, 'day')) {
+                    return '#faad14';
+                } else if (due.diff(today, 'days') <= 3) {
+                    return '#fa8c16';
+                } else {
+                    return '#1677ff';
+                }
+            };
+
+            const getTaskStats = () => {
+                const total = allTasks.length;
+                const pending = allTasks.filter(task => task.status === 'planned').length;
+                const inProgress = allTasks.filter(task => task.status === 'in_progress').length;
+                const completed = allTasks.filter(task => task.status === 'done').length;
+
+                const high = allTasks.filter(task => task.priority === 'high').length;
+                const medium = allTasks.filter(task => task.priority === 'medium').length;
+                const low = allTasks.filter(task => task.priority === 'low').length;
+
+                const today = moment().startOf('day');
+                const tomorrow = moment().add(1, 'day').startOf('day');
+                const nextWeekStart = moment().add(1, 'week').startOf('week');
+                const nextWeekEnd = moment().add(1, 'week').endOf('week');
+
+                const overdue = allTasks.filter(task =>
+                    task.due_date &&
+                    moment(task.due_date).startOf('day').isBefore(today) &&
+                    task.status !== 'done'
+                ).length;
+
+                const todayTasks = allTasks.filter(task =>
+                    task.due_date &&
+                    moment(task.due_date).startOf('day').isSame(today)
+                ).length;
+
+                const tomorrowTasks = allTasks.filter(task =>
+                    task.due_date &&
+                    moment(task.due_date).startOf('day').isSame(tomorrow)
+                ).length;
+
+                const nextWeekTasks = allTasks.filter(task =>
+                    task.due_date &&
+                    moment(task.due_date).startOf('day').isBetween(nextWeekStart, nextWeekEnd, null, '[]')
+                ).length;
+
+                return {
+                    total, pending, inProgress, completed,
+                    high, medium, low,
+                    overdue, todayTasks, tomorrowTasks, nextWeekTasks
+                };
+            };
+
+            const StatusDot = ({color, size = 8}) => (
+                <span
+                    style={{
+                        display: 'inline-block',
+                        width: size,
+                        height: size,
+                        borderRadius: '50%',
+                        backgroundColor: color,
+                        marginRight: '6px'
+                    }}
                 />
-            )}
+            );
 
-            {/* Task Modal */}
-            <Modal
-                title={editingTask ? 'Edit Task' : 'Create New Task'}
-                open={taskModalVisible}
-                onCancel={() => setTaskModalVisible(false)}
-                footer={null}
-                width={600}
-            >
-                <Form
-                    form={form}
-                    layout="vertical"
-                    onFinish={handleSubmitTask}
-                >
-                    <Form.Item
-                        name="title"
-                        label="Task Title"
-                        rules={[
-                            { required: true, message: 'Please enter task title' },
-                            { max: 500, message: 'Title must be less than 500 characters' }
-                        ]}
-                    >
-                        <Input placeholder="Enter task title" />
-                    </Form.Item>
-
-                    <Form.Item
-                        name="description"
-                        label="Description"
-                    >
-                        <TextArea
-                            rows={3}
-                            placeholder="Enter task description (optional)"
-                        />
-                    </Form.Item>
-
-                    <div style={{ display: 'flex', gap: '16px' }}>
-                        <Form.Item
-                            name="priority"
-                            label="Priority"
-                            style={{ flex: 1 }}
-                        >
-                            <Select>
-                                <Select.Option value="low">Low</Select.Option>
-                                <Select.Option value="medium">Medium</Select.Option>
-                                <Select.Option value="high">High</Select.Option>
-                            </Select>
-                        </Form.Item>
-
-                        <Form.Item
-                            name="status"
-                            label="Status"
-                            style={{ flex: 1 }}
-                        >
-                            <Select>
-                                <Select.Option value="planned">Planned</Select.Option>
-                                <Select.Option value="in_progress">In Progress</Select.Option>
-                                <Select.Option value="done">Done</Select.Option>
-                            </Select>
-                        </Form.Item>
+            if (loading) {
+                return (
+                    <div style={{display: 'flex', justifyContent: 'center', padding: '100px'}}>
+                        <Spin size="large"/>
                     </div>
+                );
+            }
 
-                    <Form.Item
-                        name="due_date"
-                        label="Due Date"
-                    >
-                        <DatePicker
-                            style={{ width: '100%' }}
-                            placeholder="Select due date"
-                            showToday
-                        />
-                    </Form.Item>
+            const stats = getTaskStats();
 
-                    <Form.Item style={{ textAlign: 'right', marginBottom: 0 }}>
+            const filterOptions = [
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#666"/>
+                    All ({stats.total})
+                </span>
+                    ),
+                    value: 'all'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#1677ff"/>
+                    Pending ({stats.pending})
+                </span>
+                    ),
+                    value: 'pending'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#faad14"/>
+                    In Progress ({stats.inProgress})
+                </span>
+                    ),
+                    value: 'in_progress'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#52c41a"/>
+                    Completed ({stats.completed})
+                </span>
+                    ),
+                    value: 'done'
+                }
+            ];
+
+            const priorityFilterOptions = [
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#666"/>
+                    All Priority ({stats.total})
+                </span>
+                    ),
+                    value: 'all'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#ff4d4f"/>
+                    High ({stats.high})
+                </span>
+                    ),
+                    value: 'high'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#faad14"/>
+                    Medium ({stats.medium})
+                </span>
+                    ),
+                    value: 'medium'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#52c41a"/>
+                    Low ({stats.low})
+                </span>
+                    ),
+                    value: 'low'
+                }
+            ];
+
+            const dateFilterOptions = [
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#666"/>
+                    All Dates ({stats.total})
+                </span>
+                    ),
+                    value: 'all'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#ff4d4f"/>
+                    Overdue ({stats.overdue})
+                </span>
+                    ),
+                    value: 'overdue'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#faad14"/>
+                    Today ({stats.todayTasks})
+                </span>
+                    ),
+                    value: 'today'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#fa8c16"/>
+                    Tomorrow ({stats.tomorrowTasks})
+                </span>
+                    ),
+                    value: 'tomorrow'
+                },
+                {
+                    label: (
+                        <span>
+                    <StatusDot color="#1677ff"/>
+                    Next Week ({stats.nextWeekTasks})
+                </span>
+                    ),
+                    value: 'next_week'
+                }
+            ];
+
+            return (
+                <div style={{padding: '24px'}}>
+                    {/* Header */}
+                    <div style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '16px'
+                    }}>
+                        <div>
+                            <Title level={2} style={{margin: 0}}>
+                                {currentList?.name || 'Tasks'}
+                            </Title>
+                        </div>
                         <Space>
-                            <Button onClick={() => setTaskModalVisible(false)}>
-                                Cancel
-                            </Button>
-                            <Button type="primary" htmlType="submit">
-                                {editingTask ? 'Update Task' : 'Create Task'}
+                            <Button
+                                type="primary"
+                                icon={<PlusOutlined/>}
+                                onClick={handleCreateTask}
+                            >
+                                Add Task
                             </Button>
                         </Space>
-                    </Form.Item>
-                </Form>
-            </Modal>
-        </div>
-    );
-};
+                    </div>
+
+                    {/* Main Content Layout: Date Filter + Tasks */}
+                    <div style={{display: 'flex', gap: '24px', alignItems: 'flex-start'}}>
+                        {/* Left Column - Date Filter */}
+                        <div style={{
+                            minWidth: '250px',
+                            background: '#fafafa',
+                            padding: '16px',
+                            borderRadius: '12px',
+                            border: '1px solid #e8e8e8'
+                        }}>
+                            <Text strong style={{
+                                marginBottom: '12px',
+                                display: 'block',
+                                color: '#333',
+                                fontSize: '16px'
+                            }}>
+                                📅 Due Date Filter
+                            </Text>
+                            <Radio.Group
+                                value={dateFilter}
+                                onChange={(e) => setDateFilter(e.target.value)}
+                                style={{width: '100%'}}
+                            >
+                                <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                                    {dateFilterOptions.map(option => (
+                                        <Radio
+                                            key={option.value}
+                                            value={option.value}
+                                            style={{
+                                                width: '100%',
+                                                padding: '8px',
+                                                borderRadius: '8px'
+                                            }}
+                                        >
+                                            <div style={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                width: '100%'
+                                            }}>
+                                                {option.label}
+                                            </div>
+                                        </Radio>
+                                    ))}
+                                </div>
+                            </Radio.Group>
+                        </div>
+
+                        {/* Right Column - Status/Priority Filters + Tasks */}
+                        <div style={{flex: 1}}>
+                            {/* Status and Priority Filters in One Row */}
+                            <div style={{marginBottom: '24px'}}>
+                                <div style={{
+                                    display: 'flex',
+                                    gap: '32px',
+                                    alignItems: 'flex-start',
+                                    flexWrap: 'wrap'
+                                }}>
+                                    {/* Status Filter */}
+                                    <div>
+                                        <Text strong style={{
+                                            marginBottom: '8px',
+                                            display: 'block',
+                                            color: '#666',
+                                            fontSize: '14px'
+                                        }}>
+                                            Status:
+                                        </Text>
+                                        <Radio.Group
+                                            value={activeFilter}
+                                            onChange={(e) => setActiveFilter(e.target.value)}
+                                            optionType="button"
+                                            buttonStyle="solid"
+                                            size="small"
+                                        >
+                                            {filterOptions.map(option => (
+                                                <Radio.Button key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </Radio.Button>
+                                            ))}
+                                        </Radio.Group>
+                                    </div>
+
+                                    {/* Priority Filter */}
+                                    <div>
+                                        <Text strong style={{
+                                            marginBottom: '8px',
+                                            display: 'block',
+                                            color: '#666',
+                                            fontSize: '14px'
+                                        }}>
+                                            Priority:
+                                        </Text>
+                                        <Radio.Group
+                                            value={priorityFilter}
+                                            onChange={(e) => setPriorityFilter(e.target.value)}
+                                            optionType="button"
+                                            buttonStyle="solid"
+                                            size="small"
+                                        >
+                                            {priorityFilterOptions.map(option => (
+                                                <Radio.Button key={option.value} value={option.value}>
+                                                    {option.label}
+                                                </Radio.Button>
+                                            ))}
+                                        </Radio.Group>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Progress Bar */}
+                            {stats.total > 0 && (
+                                <div style={{
+                                    background: '#fff',
+                                    padding: '16px',
+                                    borderRadius: '8px',
+                                    marginBottom: '16px',
+                                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                                }}>
+                                    <div style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        marginBottom: '8px'
+                                    }}>
+                                        <Text strong>Progress</Text>
+                                        <Text
+                                            strong>{Math.round((stats.completed / stats.total) * 100)}%</Text>
+                                    </div>
+                                    <div style={{
+                                        background: '#f0f0f0',
+                                        borderRadius: '4px',
+                                        height: '8px',
+                                        overflow: 'hidden'
+                                    }}>
+                                        <div style={{
+                                            background: '#52c41a',
+                                            height: '100%',
+                                            width: `${(stats.completed / stats.total) * 100}%`,
+                                            borderRadius: '4px',
+                                            transition: 'width 0.3s ease'
+                                        }}/>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Tasks List */}
+                            {filteredTasks.length === 0 ? (
+                                <Empty
+                                    description={
+                                        allTasks.length === 0
+                                            ? "No tasks yet"
+                                            : `No tasks found for selected filters`
+                                    }
+                                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                                >
+                                    {allTasks.length === 0 && (
+                                        <Button type="primary" icon={<PlusOutlined/>}
+                                                onClick={handleCreateTask}>
+                                            Create your first task
+                                        </Button>
+                                    )}
+                                </Empty>
+                            ) : (
+                                <List
+                                    dataSource={filteredTasks}
+                                    renderItem={(task) => (
+                                        <List.Item>
+                                            <Card
+                                                style={{
+                                                    width: '100%',
+                                                    opacity: task.status === 'done' ? 0.7 : 1,
+                                                    transition: 'opacity 0.3s ease'
+                                                }}
+                                                bodyStyle={{padding: '16px'}}
+                                            >
+                                                <div style={{
+                                                    display: 'flex',
+                                                    alignItems: 'flex-start',
+                                                    gap: '12px'
+                                                }}>
+                                                    <Tooltip
+                                                        title={task.status === 'done' ? 'Mark as incomplete' : 'Mark as complete'}>
+                                                        <Checkbox
+                                                            checked={task.status === 'done'}
+                                                            onChange={() => handleToggleTaskStatus(task)}
+                                                            style={{marginTop: '2px'}}
+                                                        />
+                                                    </Tooltip>
+
+                                                    <div style={{flex: 1}}>
+                                                        <div style={{
+                                                            display: 'flex',
+                                                            justifyContent: 'space-between',
+                                                            alignItems: 'flex-start'
+                                                        }}>
+                                                            <div style={{flex: 1}}>
+                                                                <Text
+                                                                    strong
+                                                                    style={{
+                                                                        textDecoration: task.status === 'done' ? 'line-through' : 'none',
+                                                                        color: task.status === 'done' ? '#999' : '#333',
+                                                                        fontSize: '16px'
+                                                                    }}
+                                                                >
+                                                                    {task.title}
+                                                                </Text>
+                                                                {task.description && (
+                                                                    <Text
+                                                                        style={{
+                                                                            display: 'block',
+                                                                            marginTop: '4px',
+                                                                            color: '#666',
+                                                                            textDecoration: task.status === 'done' ? 'line-through' : 'none'
+                                                                        }}
+                                                                    >
+                                                                        {task.description}
+                                                                    </Text>
+                                                                )}
+                                                                <div style={{
+                                                                    marginTop: '8px',
+                                                                    display: 'flex',
+                                                                    gap: '8px',
+                                                                    flexWrap: 'wrap',
+                                                                    alignItems: 'center'
+                                                                }}>
+                                                                    <Tag
+                                                                        style={{
+                                                                            backgroundColor: getPriorityColor(task.priority),
+                                                                            color: '#fff',
+                                                                            border: 'none',
+                                                                            fontWeight: '500'
+                                                                        }}
+                                                                    >
+                                                                        {task.priority.toUpperCase()}
+                                                                    </Tag>
+                                                                    <Tag
+                                                                        style={{
+                                                                            backgroundColor: getStatusColor(task.status),
+                                                                            color: '#fff',
+                                                                            border: 'none',
+                                                                            fontWeight: '500'
+                                                                        }}
+                                                                    >
+                                                                        {task.status === 'in_progress' ? 'IN PROGRESS' : task.status.toUpperCase()}
+                                                                    </Tag>
+                                                                    {task.due_date && (
+                                                                        <Tag
+                                                                            style={{
+                                                                                backgroundColor: getDueDateColor(task.due_date, task.status),
+                                                                                color: '#fff',
+                                                                                border: 'none',
+                                                                                fontWeight: '500'
+                                                                            }}
+                                                                        >
+                                                                            {moment(task.due_date).format('MMM DD')}
+                                                                            {moment(task.due_date).isBefore(moment(), 'day') && task.status !== 'done' && ' (OVERDUE)'}
+                                                                        </Tag>
+                                                                    )}
+                                                                    {task.completed_at && (
+                                                                        <Tag
+                                                                            style={{
+                                                                                backgroundColor: '#52c41a',
+                                                                                color: '#fff',
+                                                                                border: 'none',
+                                                                                fontWeight: '500'
+                                                                            }}
+                                                                        >
+                                                                            ✓ {moment(task.completed_at).format('MMM DD')}
+                                                                        </Tag>
+                                                                    )}
+
+                                                                    {/* Timer display - активний таймер */}
+                                                                    {activeTimers[task.id] && (
+                                                                        <Tag
+                                                                            style={{
+                                                                                backgroundColor: '#000000',
+                                                                                color: '#fff',
+                                                                                border: 'none',
+                                                                                fontWeight: '500',
+                                                                                animation: 'pulse 2s infinite'
+                                                                            }}
+                                                                        >
+                                                                            <ClockCircleOutlined
+                                                                                style={{marginRight: '4px'}}/>
+                                                                            {formatDuration(timerTimes[task.id] || 0)}
+                                                                        </Tag>
+                                                                    )}
+
+                                                                    {/* Загальний час - завжди показуємо якщо є */}
+                                                                    {!activeTimers[task.id] && totalTimes[task.id] > 0 && (
+                                                                        <Tag
+                                                                            style={{
+                                                                                backgroundColor: '#666666',
+                                                                                color: '#fff',
+                                                                                border: 'none',
+                                                                                fontWeight: '500'
+                                                                            }}
+                                                                        >
+                                                                            <ClockCircleOutlined
+                                                                                style={{marginRight: '4px'}}/>
+                                                                            {formatDuration(totalTimes[task.id])}
+                                                                        </Tag>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+
+                                                            <Space>
+                                                                {/* Timer Button */}
+                                                                {activeTimers[task.id] ? (
+                                                                    <Tooltip
+                                                                        title={`Running: ${formatDuration(timerTimes[task.id] || 0)}${totalTimes[task.id] > 0 ? ` (Total: ${formatDuration(totalTimes[task.id] + (timerTimes[task.id] || 0))})` : ''}`}>
+                                                                        <Button
+                                                                            type="text"
+                                                                            icon={<PauseCircleOutlined/>}
+                                                                            onClick={() => stopTimer(task.id)}
+                                                                            style={{color: '#ff4d4f'}}
+                                                                        />
+                                                                    </Tooltip>
+                                                                ) : (
+                                                                    <Tooltip
+                                                                        title={totalTimes[task.id] > 0 ? `Start timer (Total: ${formatDuration(totalTimes[task.id])})` : "Start timer"}>
+                                                                        <Button
+                                                                            type="text"
+                                                                            icon={<PlayCircleOutlined/>}
+                                                                            onClick={() => startTimer(task.id)}
+                                                                            style={{color: '#52c41a'}}
+                                                                        />
+                                                                    </Tooltip>
+                                                                )}
+
+                                                                <Tooltip title="Edit task">
+                                                                    <Button
+                                                                        type="text"
+                                                                        icon={<EditOutlined/>}
+                                                                        onClick={() => handleEditTask(task)}
+                                                                    />
+                                                                </Tooltip>
+                                                                <Popconfirm
+                                                                    title="Delete task"
+                                                                    description="Are you sure you want to delete this task?"
+                                                                    onConfirm={() => handleDeleteTask(task.id)}
+                                                                    okText="Yes"
+                                                                    cancelText="No"
+                                                                >
+                                                                    <Button
+                                                                        type="text"
+                                                                        danger
+                                                                        icon={<DeleteOutlined/>}
+                                                                    />
+                                                                </Popconfirm>
+                                                            </Space>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </Card>
+                                        </List.Item>
+                                    )}
+                                />
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Task Modal */}
+                    <Modal
+                        title={editingTask ? 'Edit Task' : 'Create New Task'}
+                        open={taskModalVisible}
+                        onCancel={() => {
+                            setTaskModalVisible(false);
+                            form.resetFields();
+                        }}
+                        footer={null}
+                        width={600}
+                    >
+                        <Form
+                            form={form}
+                            layout="vertical"
+                            onFinish={handleSubmitTask}
+                        >
+                            <Form.Item
+                                label="Title"
+                                name="title"
+                                rules={[
+                                    {required: true, message: 'Please enter task title'},
+                                    {max: 500, message: 'Title must be less than 500 characters'}
+                                ]}
+                            >
+                                <Input placeholder="Enter task title"/>
+                            </Form.Item>
+
+                            <Form.Item
+                                label="Description"
+                                name="description"
+                            >
+                                <TextArea rows={3} placeholder="Enter task description"/>
+                            </Form.Item>
+
+                            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px'}}>
+                                <Form.Item label="Priority" name="priority">
+                                    <Select>
+                                        <Select.Option value="low">Low</Select.Option>
+                                        <Select.Option value="medium">Medium</Select.Option>
+                                        <Select.Option value="high">High</Select.Option>
+                                    </Select>
+                                </Form.Item>
+
+                                <Form.Item label="Status" name="status">
+                                    <Select>
+                                        <Select.Option value="planned">Planned</Select.Option>
+                                        <Select.Option value="in_progress">In Progress</Select.Option>
+                                        <Select.Option value="done">Done</Select.Option>
+                                    </Select>
+                                </Form.Item>
+
+                                <Form.Item label="Due Date" name="due_date">
+                                    <DatePicker style={{width: '100%'}}/>
+                                </Form.Item>
+                            </div>
+
+                            <Form.Item style={{textAlign: 'right', marginBottom: 0}}>
+                                <Space>
+                                    <Button onClick={() => setTaskModalVisible(false)}>
+                                        Cancel
+                                    </Button>
+                                    <Button type="primary" htmlType="submit">
+                                        {editingTask ? 'Update' : 'Create'} Task
+                                    </Button>
+                                </Space>
+                            </Form.Item>
+                        </Form>
+                    </Modal>
+                </div>
+            );
+        }
+    }
+}
 
 export default ListView;

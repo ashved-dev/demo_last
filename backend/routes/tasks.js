@@ -76,12 +76,14 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, priority, due_date, list_id } = req.body;
+    const { title, description, priority, status, due_date, list_id } = req.body;
 
     const task = await Task.findOne({
       where: { id, user_id: req.user.id }
     });
+
     if (!task) {
+      console.log('Task not found');
       return res.status(404).json({ error: 'Task not found' });
     }
 
@@ -95,15 +97,34 @@ router.put('/:id', async (req, res) => {
       }
     }
 
-    await task.update({
-      ...(title !== undefined && { title: title.trim() }),
-      ...(description !== undefined && { description: description?.trim() }),
-      ...(priority !== undefined && { priority }),
-      ...(due_date !== undefined && { due_date: due_date ? new Date(due_date) : null }),
-      ...(list_id !== undefined && { list_id })
-    });
+    // Prepare update data including status
+    const updateData = {};
+    if (title !== undefined) updateData.title = title.trim();
+    if (description !== undefined) updateData.description = description?.trim();
+    if (priority !== undefined) updateData.priority = priority;
+    if (due_date !== undefined) updateData.due_date = due_date ? new Date(due_date) : null;
+    if (list_id !== undefined) updateData.list_id = list_id;
 
-    res.json(task);
+    // Handle status update with completed_at logic
+    if (status !== undefined) {
+      updateData.status = status;
+
+      // Set/clear completed_at based on status change
+      if (status === 'done' && task.status !== 'done') {
+        updateData.completed_at = new Date();
+      } else if (status !== 'done' && task.status === 'done') {
+        updateData.completed_at = null;
+      }
+    }
+
+    console.log('Update data:', updateData);
+
+    await task.update(updateData);
+    const updatedTask = await task.reload();
+
+    console.log('Updated task:', updatedTask.toJSON());
+
+    res.json(updatedTask);
   } catch (error) {
     console.error('Update task error:', error);
     res.status(500).json({ error: 'Failed to update task' });
