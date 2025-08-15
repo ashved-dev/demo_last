@@ -73,22 +73,6 @@ const LoginForm = ({ onSwitchToRegister, onLoginSuccess }) => {
             <Text type="secondary">Sign in to your account</Text>
           </div>
 
-          {error && (
-              <Alert
-                  message={error.message}
-                  type={error.type}
-                  showIcon
-                  style={{ marginBottom: 16 }}
-                  action={
-                    error.message.includes('No account found') ? (
-                        <Button size="small" type="link" onClick={onSwitchToRegister}>
-                          Create account
-                        </Button>
-                    ) : null
-                  }
-              />
-          )}
-
           <Form
               form={form}
               name="login"

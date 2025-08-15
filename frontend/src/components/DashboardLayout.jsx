@@ -24,8 +24,7 @@ import {
   UnorderedListOutlined,
   PlusOutlined,
   EditOutlined,
-  DeleteOutlined,
-  SettingOutlined
+  DeleteOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -57,15 +56,29 @@ const DashboardLayout = ({ children }) => {
     if (path.includes('/list/')) {
       const listId = path.split('/list/')[1];
       setSelectedKey(listId);
-    } else {
-      setSelectedKey('dashboard');
+    } else if (path.includes('/inbox')) {
+      // Find inbox list ID
+      const inboxList = lists.find(list => list.is_default);
+      if (inboxList) {
+        setSelectedKey(inboxList.id);
+      } else {
+        setSelectedKey('inbox');
+      }
     }
-  }, [location]);
+  }, [location, lists]);
 
   const fetchLists = async () => {
     try {
       const response = await apiClient.get('/lists');
       setLists(response);
+
+      // Auto-redirect to inbox if on /inbox route
+      if (location.pathname === '/inbox' && response.length > 0) {
+        const inboxList = response.find(list => list.is_default);
+        if (inboxList) {
+          navigate(`/list/${inboxList.id}`, { replace: true });
+        }
+      }
     } catch (error) {
       message.error('Failed to fetch lists');
       console.error('Failed to fetch lists:', error);
@@ -76,14 +89,13 @@ const DashboardLayout = ({ children }) => {
 
   const handleMenuClick = ({ key }) => {
     setSelectedKey(key);
-    if (key === 'dashboard') {
-      navigate('/dashboard');
-    } else if (key === 'inbox') {
+
+    if (key === 'inbox') {
       const inboxList = lists.find(list => list.is_default);
       if (inboxList) {
         navigate(`/list/${inboxList.id}`);
       } else {
-        navigate('/dashboard');
+        navigate('/inbox');
       }
     } else {
       navigate(`/list/${key}`);
@@ -117,9 +129,14 @@ const DashboardLayout = ({ children }) => {
       setLists(updatedLists);
       message.success('List deleted successfully!');
 
-      // If we're currently viewing the deleted list, navigate to dashboard
+      // If we're currently viewing the deleted list, navigate to inbox
       if (selectedKey === listId) {
-        navigate('/dashboard');
+        const inboxList = updatedLists.find(list => list.is_default);
+        if (inboxList) {
+          navigate(`/list/${inboxList.id}`);
+        } else {
+          navigate('/inbox');
+        }
       }
     } catch (error) {
       message.error(error.message || 'Failed to delete list');
@@ -164,7 +181,7 @@ const DashboardLayout = ({ children }) => {
     {
       key: 'profile',
       icon: <UserOutlined />,
-      label: user?.name || 'Profile'
+      label: 'Profile'
     },
     {
       type: 'divider'
@@ -180,13 +197,8 @@ const DashboardLayout = ({ children }) => {
   const inboxList = lists.find(list => list.is_default);
   const customLists = lists.filter(list => !list.is_default);
 
-  // Prepare sidebar items with custom rendering for actions
+  // Prepare sidebar items - Inbox is now the main item
   const sidebarItems = [
-    {
-      key: 'dashboard',
-      icon: <SettingOutlined />,
-      label: 'Dashboard'
-    },
     {
       key: inboxList?.id || 'inbox',
       icon: <InboxOutlined />,
@@ -224,15 +236,14 @@ const DashboardLayout = ({ children }) => {
                       title="Delete this list?"
                       description="This action cannot be undone."
                       onConfirm={(e) => handleDeleteList(list.id, e)}
-                      onClick={(e) => e.stopPropagation()}
                       okText="Delete"
                       cancelText="Cancel"
+                      placement="right"
                   >
                     <Button
                         type="text"
                         size="small"
                         icon={<DeleteOutlined />}
-                        danger
                         onClick={(e) => e.stopPropagation()}
                         style={{
                           color: 'rgba(255,255,255,0.65)',
@@ -257,14 +268,18 @@ const DashboardLayout = ({ children }) => {
             collapsible
             collapsed={collapsed}
             width={280}
-            style={{ background: '#001529' }}
+            collapsedWidth={80}
+            style={{
+              background: 'linear-gradient(180deg, #1677ff 0%, #0958d9 100%)',
+              boxShadow: '2px 0 8px rgba(0,0,0,0.15)'
+            }}
         >
-          <div style={{ padding: '16px 12px' }}>
+          <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{
-              color: 'white',
-              fontSize: '18px',
+              color: '#fff',
+              fontSize: collapsed ? '18px' : '20px',
               fontWeight: 'bold',
-              marginBottom: '24px',
+              padding: '16px',
               textAlign: collapsed ? 'center' : 'left'
             }}>
               {collapsed ? 'TM' : 'Task Manager'}
@@ -296,7 +311,8 @@ const DashboardLayout = ({ children }) => {
                             icon={<PlusOutlined />}
                             onClick={handleCreateList}
                             style={{
-                              width: '100%',
+                              width: 'calc(100% - 32px)',
+                              margin: '0 16px',
                               color: 'rgba(255,255,255,0.85)',
                               borderColor: 'rgba(255,255,255,0.3)',
                               background: 'transparent'

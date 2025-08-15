@@ -28,7 +28,6 @@ const RegisterPage = () => {
       navigate('/dashboard', { replace: true });
     } catch (error) {
       // Якщо автоматичний логін не вдався, перенаправляємо на сторінку логіну
-      message.info('Please log in with your new account');
       navigate('/login');
     }
   };

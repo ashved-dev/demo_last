@@ -24,3 +24,56 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
   monospace;
 }
+
+/* Додайте це в кінець файлу frontend/src/index.css */
+
+@keyframes pulse {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Виправлення для Ant Design Select dropdown */
+.ant-select-dropdown .ant-select-item-option {
+  color: #000 !important;
+  background-color: #fff !important;
+}
+
+.ant-select-dropdown .ant-select-item-option:hover {
+  background-color: #f5f5f5 !important;
+  color: #000 !important;
+}
+
+.ant-select-dropdown .ant-select-item-option-selected {
+  background-color: #e6f4ff !important;
+  color: #000 !important;
+}
+
+.ant-select-dropdown .ant-select-item-option-active {
+  background-color: #f5f5f5 !important;
+  color: #000 !important;
+}
+
+/* Додаткове виправлення для всіх span елементів у dropdown */
+.ant-select-dropdown .ant-select-item-option span {
+  color: #000 !important;
+}
+
+/* Для модалки створення таски */
+.task-modal .ant-select-dropdown .ant-select-item-option {
+  color: #000 !important;
+  background-color: #fff !important;
+}
+
+.task-modal .ant-select-dropdown .ant-select-item-option span {
+  color: #000 !important;
+}

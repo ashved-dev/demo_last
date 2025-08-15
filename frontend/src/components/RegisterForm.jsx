@@ -72,22 +72,6 @@ const RegisterForm = ({ onSwitchToLogin, onRegistrationSuccess }) => {
                     <Text type="secondary">Join Task Manager today</Text>
                 </div>
 
-                {error && (
-                    <Alert
-                        message={error}
-                        type="error"
-                        showIcon
-                        style={{ marginBottom: 16 }}
-                        action={
-                            error.includes('already registered') ? (
-                                <Button size="small" type="link" onClick={onSwitchToLogin}>
-                                    Login instead
-                                </Button>
-                            ) : null
-                        }
-                    />
-                )}
-
                 <Form
                     form={form}
                     name="register"

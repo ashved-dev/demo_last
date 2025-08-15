@@ -12,16 +12,16 @@ const LoginPage = () => {
 
   const handleLoginSuccess = (user) => {
     console.log('Login successful:', user);
-    // Redirect to intended page or dashboard
-    const from = location.state?.from?.pathname || '/dashboard';
+    // Redirect to intended page or inbox (instead of dashboard)
+    const from = location.state?.from?.pathname || '/inbox';
     navigate(from, { replace: true });
   };
 
   return (
-    <LoginForm 
-      onSwitchToRegister={handleSwitchToRegister}
-      onLoginSuccess={handleLoginSuccess}
-    />
+      <LoginForm
+          onSwitchToRegister={handleSwitchToRegister}
+          onLoginSuccess={handleLoginSuccess}
+      />
   );
 };
 
